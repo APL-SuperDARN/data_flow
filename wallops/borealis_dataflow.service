@@ -1,0 +1,10 @@
+[Unit]
+Description=Borealis data flow inotify daemon (Wallops)
+
+[Service]
+User=radar
+ExecStart=/home/radar/repos/data_flow/wallops/borealis.daemon
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

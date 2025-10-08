@@ -1,0 +1,83 @@
+#!/bin/bash
+# Copyright 2022 SuperDARN Canada, University of Saskatchewan
+# Author: Theodore Kolkman
+# Adapted for Wallops by Jordan Wiker
+#
+# Inotify script to be run on Borealis computer. Executes rsync_to_nas
+#
+# Dependencies:
+#	- inotifywait (installed by zypper in inotify-tools)
+#   - SITE_LINUX set as environment variable in $HOME/.profile
+#
+# Triggers rsync_to_nas when 2-hour set of Borealis files finish writing
+#
+# inotify watches the directory borealis writes to, and triggers the rsync_to_nas script only when 
+# a 2-hour site file is created. Since these files are only created once, and once they're created 
+# the previous 2-hour block is finished writing, the rsync_to_nas script will execute immediately 
+# after Borealis finishes writing the 2-hour file
+
+###################################################################################################
+
+source "${HOME}/.profile"	# Load in environment variables
+
+readonly WATCH_DIR="/data/borealis_data"
+
+script_name=$(echo $(basename $0) | cut --fields 1 --delimiter '.')
+readonly LOG_DIR="${HOME}/logs/inotify_daemons"
+mkdir --parents $LOG_DIR
+readonly LOGFILE="${LOG_DIR}/${script_name}.log"
+readonly RSYNC_TO_NAS="${HOME}/repos/data_flow/wallops/rsync_to_nas.sh"
+
+readonly FILTER_TIME=120  # Minumum time between script executions in seconds
+
+# No flag functionality for Wallops
+# # Location of inotify watch directory for flags on site linux. Should match up with site-linux
+# # inotify's WATCH_DIR
+# readonly REMOTE_FLAG_DEST="/home/transfer/data_flow/.inotify_watchdir"
+
+# # Flag to send to start next script
+# readonly FLAG_SRC="${HOME}/data_flow/.inotify_flags"
+# mkdir --parents $FLAG_SRC
+# readonly FLAG_OUT="${FLAG_SRC}/.borealis_flag" 
+
+###################################################################################################
+
+exec &>> $LOGFILE # Redirect STDOUT and STDERR to $LOGFILE
+printf "Starting $0 at $(date --utc "+%Y%m%d %H:%M:%S UTC")\n"
+
+# Inotify is triggered multiple times as multiple 2-hour site files are created. We only want to 
+# have our script execute once when these files are created. When inotify triggers multiple times, 
+# each instance is put in a queue by `read`, so after the first time the script executes, it will 
+# execute again multiple times in quick succession. To filter out these extra script calls, the time
+# (in seconds since the epoch) when the script executes the first time is recorded. Then, before 
+# executing the script, the current time is compared to the last time it executed. This filters out 
+# all the extra inotifywait triggers.
+endtime=0
+
+inotifywait --recursive --monitor --syslog --timefmt '%Y%m%d.%H:%M:%S' --format '%T %w %e %f' --event create $WATCH_DIR | \
+while read TIME DIRECTORY ACTION FILE # These must line up with format parameters
+do
+    if [[ "$FILE" =~ .*\.(h5|rawacf)$ ]]   # Only interested in 2 hour .site files
+    then
+        # If script just executed, then don't execute again
+        cur_time=$(date "+%s")
+
+        # This if statement will only trigger once the previous 2-hour file is finished writing
+        if [[ $(($endtime + $FILTER_TIME)) -lt $cur_time ]]; then
+            printf "$(date --utc "+%Y%m%d %H:%M:%S UTC") - Inotify triggered on $0\n"
+
+            # Pass current filename as parameter so script knows what file to omit
+            printf "Executing rsync_to_nas $FILE\n"
+            "$RSYNC_TO_NAS" "$FILE"
+
+            # No Flags for Wallops
+            # # Send "flag" file to notify site-linux computer to start next script
+            # printf "Sending $(basename ${FLAG_OUT}) to ${SITE_LINUX}:${REMOTE_FLAG_DEST}\n"
+            # touch $FLAG_OUT
+            # rsync --archive --rsh=ssh "${FLAG_OUT}" "${SITE_LINUX}:${REMOTE_FLAG_DEST}"
+
+            printf "$(date --utc "+%Y%m%d %H:%M:%S UTC") - Inotify finished on $0\n\n"
+            endtime=$(date "+%s")
+        fi
+    fi
+done
