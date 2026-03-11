@@ -48,6 +48,15 @@ readonly SUMMARY_DIR="${HOME}/logs/rsync_to_nas/summary/$(date +%Y/%m)"
 mkdir --parents $SUMMARY_DIR
 readonly SUMMARY_FILE="${SUMMARY_DIR}/$(date -u +%Y%m%d).rsync_to_nas_summary.log"
 
+readonly EXPECTED_SOURCE="/data/borealis_data"
+
+if [[ "$SOURCE" != "$EXPECTED_SOURCE" ]]; then
+    message="Skipping sync: SOURCE is '$SOURCE', expected '$EXPECTED_SOURCE'"
+    printf "%s\n" "$message" | tee --append "$SUMMARY_FILE"
+    printf "Exiting without transfer.\n\n" | tee --append "$SUMMARY_FILE"
+    exit 2
+fi
+
 # Telemetry directory for this script and site (Not used at Wallops)
 # readonly TELEMETRY_SCRIPT_DIR="${TELEMETRY_DIR}/${RADAR_ID}/rsync_to_nas"
 ###################################################################################################
